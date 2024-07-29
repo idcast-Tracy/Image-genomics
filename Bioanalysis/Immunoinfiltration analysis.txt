@@ -1,0 +1,75 @@
+cat("\014");rm(list = ls());options(warn = -1);library(e1071);library(preprocessCore);library(parallel);library(dplyr);library(data.table)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# if (!require("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("preprocessCore")
+
+cc = 2 
+mydata <- read.csv("TCGA-label-fpkm113.csv"); names(mydata)[1] <- "ID"
+mydata = as.data.frame(t(mydata));colnames(mydata) <- mydata[1,];mydata2 = mydata[-1,];mydata3 = cbind(as.data.frame(rownames(mydata2)),mydata2);names(mydata3)[1] <- "ID"
+#       ID         label futime fustat Age  Gender    Stage   T  M  N    ADAMTS13
+# 1 TCGA.2V.A95S     1     NA   Alive  NA    MALE    Stage II T2 NX MX      214
+
+mydata = mydata3
+fpkm_matrix <- mydata[,c(1,((cc+1):ncol(mydata)))];colnames(fpkm_matrix)[1] <- "Genesymbol"
+if(nrow(fpkm_matrix) < ncol(fpkm_matrix)){Fpkm_matrix <- data.frame(t(fpkm_matrix));Fpkm_matrix <- cbind(rownames(Fpkm_matrix),Fpkm_matrix)
+colnames(Fpkm_matrix) <- Fpkm_matrix[1,];Fpkm_matrix <- Fpkm_matrix[-1,];rownames(Fpkm_matrix) <- c(1:nrow(Fpkm_matrix))} else{print("next step")}
+# write.table(Fpkm_matrix,"tpm_expr.txt",row.names = FALSE,quote = FALSE,sep = "\t")
+
+dat = Fpkm_matrix;rownames(dat) = dat[,1];dat = dat[,-1]
+
+# if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+# 
+# depens<-c('tibble', 'survival', 'survminer', 'sva', 'limma', "DESeq2","devtools",
+#           'limSolve', 'GSVA', 'e1071', 'preprocessCore', 'ggplot2', "biomaRt",
+#           'ggpubr', "devtools", "tidyHeatmap", "caret", "glmnet", "ppcor", "timeROC","pracma")
+# for(i in 1:length(depens)){
+#   depen<-depens[i]
+#   if (!requireNamespace(depen, quietly = TRUE))
+#     BiocManager::install(depen,update = FALSE)
+# }
+# if (!requireNamespace("IOBR", quietly = TRUE))
+#   devtools::install_github("IOBR/IOBR")
+library(IOBR)
+
+# CIBERSORT
+cibersort<-deconvo_tme(eset = dat, method = "cibersort", arrays = FALSE, perm = 200 )
+# write.csv(cibersort,"cibersort.csv",row.names = F)
+
+# EPIC
+for (i in colnames(dat)) {dat[,i] = as.numeric(dat[,i])} 
+epic<-deconvo_tme(eset = dat, method = "epic", arrays = FALSE)
+# write.csv(epic,"epic.csv",row.names = F)
+
+#mcpcounter
+mcp<-deconvo_tme(eset = dat, method = "mcpcounter")
+# write.csv(mcp,"mcp.csv",row.names = F)
+
+#xCELL
+xcell<-deconvo_tme(eset = dat, method = "xcell",arrays = FALSE)
+# write.csv(xcell,"xcell.csv",row.names = F)
+
+#estimate
+estimate<-deconvo_tme(eset = dat, method = "estimate")
+# write.csv(estimate,"estimate.csv",row.names = F)
+
+#TIMER
+timer<-deconvo_tme(eset = dat, method = "timer", group_list = rep("stad",dim(dat)[2]))
+# write.csv(timer,"timer.csv",row.names = F)
+
+#quanTIseq
+quantiseq<-deconvo_tme(eset = dat, tumor = TRUE, arrays = FALSE, scale_mrna = TRUE, method = "quantiseq")
+# write.csv(quantiseq,"quantiseq.csv",row.names = F)
+
+tme_combine<-cibersort %>% 
+  inner_join(.,mcp,by       = "ID") %>% 
+  inner_join(.,xcell,by     = "ID") %>%
+  inner_join(.,epic,by      = "ID") %>% 
+  # inner_join(.,estimate,by  = "ID") %>% 
+  inner_join(.,timer,by     = "ID") %>% 
+  inner_join(.,quantiseq,by = "ID")
+write.csv(tme_combine,"tme_combine.csv",row.names = F)
+
+#IPS
+ips<-deconvo_tme(eset = dat, method = "ips", plot= FALSE)
+write.csv(ips,"table.csv",row.names = F)

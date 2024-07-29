@@ -1,0 +1,69 @@
+# # -------------------- Auto-Logi  --------------------------#
+cat("\014"); rm(list = ls());  options(warn = -1); pacman::p_load("foreign", "rms"); library(caret); library(ROCR); library(rmda); library(autoReg); library(rrtable)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+Cohort = c('train.csv', 'test.csv', 'val.csv')
+Num = length(Cohort); ex = Num-2
+train_data <- read.csv(Cohort[1]); names(train_data)
+
+Train_data <- train_data
+# set.seed(60); Train_data <- upSample(x=train_data[,-2], y=train_data[,2]) 
+
+Clin_var = c(2, 5:19); Rads_var = c(20)
+# for (j in c(6:19)) {Train_data[,j] = as.factor(Train_data[,j])}
+
+fit = glm(label~., data=Train_data[, Clin_var], family="binomial")
+Reg = autoReg(fit, uni=TRUE, threshold=0.05, final= TRUE); Reg
+# table2docx(myft(Reg), title='Univariate and multivariate logistics analysis')
+
+
+model_var = c('Menopausal_Status+MRI_ALN_status+MRI_ALN_burden')
+Rads_formula = as.formula(paste0('label ~ ', paste0(names(train_data)[Rads_var], collapse = "+")))
+Clin_formula = as.formula(paste0('label ~ ', paste0(model_var, collapse = "+")))
+Comd_formula = as.formula(paste0('label ~ ', paste0(c(model_var, names(train_data)[Rads_var]),collapse = "+")))
+Clin_formula; Rads_formula; Comd_formula
+table2docx(myft(autoReg(glm(Comd_formula, data=Train_data, family="binomial"), uni=TRUE, threshold=1)), title='Construction of Combined model', append=TRUE)
+
+
+dd1<-datadist(Train_data); options(datadist="dd1")
+Preformance = function(Formulas, Newdata, cohort){
+  title = ifelse(Formulas == Clin_formula, 'Clin_', 'Comd_') 
+  fit0<-glm(Formulas, data = train_data, family=binomial(link="logit")); fit0Sum = summary(fit0)
+  pred.logit = predict(fit0, newdata = Newdata); df <- data.frame(label = Newdata$label, probability = 1/(1+exp(-pred.logit))); write.csv(df, file = paste0(title, cohort, "_results.csv"), row.names = FALSE, quote = TRUE)
+  auc <- round(unlist(slot(performance(prediction(1/(1+exp(-pred.logit)), Newdata$label),'auc'),'y.values')), 3); print(paste0(title, cohort, ' AUC = ', auc))
+  pdf(paste0(title, cohort, ' ', auc, ' High-Lever_Calibrate.pdf')); print(val.prob(1/(1+exp(-pred.logit)), Newdata$label,m=10,cex=0.5)); dev.off()
+  pdf(paste0(title, 'Nomogram.pdf'), width = 7.7, height = 6, onefile = FALSE)
+  fit1<- lrm(Formulas, data = train_data, x = T, y = T)
+  nom <- nomogram(fit1, fun=plogis, fun.at = c(0.01,0.1,0.3,0.5,0.7,0.9,0.99), lp = F, funlabel = "Probability")   # Recurrence
+  plot(nom, xfrac=0.5); dev.off()}
+
+Co_Name = c('train', 'test', 'val1','val2')
+for (mo in c(1:3)) {
+  if (mo==1){Model=Clin_formula}; if (mo==2){Model=Rads_formula}; if (mo==2){Model=Comd_formula}
+  for (co in c(1:Num)){
+    if (co==1){Preformance(Model, Train_data, Co_Name[1])}
+    if (co!=1){Preformance(Model, read.csv(Cohort[co]), Co_Name[co])}}}
+
+
+Clin_formula; Comd_formula
+data = train_data; pdf('DCA_curve_train.pdf',width=6.5,height=6.5)
+dca1=decision_curve(formula = Clin_formula, data = data, family=binomial(link="logit"), confidence.intervals = T, bootstraps = 1000, fitted.risk = F, thresholds=seq(0,1,by=0.01), study.design='cohort')
+dca2=decision_curve(formula = Rads_formula,  data = data, family=binomial(link="logit"), confidence.intervals = T, bootstraps = 1000, fitted.risk = F)
+dca3=decision_curve(formula = Comd_formula, data = data, family=binomial(link="logit"), confidence.intervals = T, bootstraps = 1000, fitted.risk = F)
+
+plot_decision_curve(list(dca1, dca2, dca3), legend.position = c("topright"), # bottomleft
+                    curve.names=c('Clinical model', 'Radiomic model', 'Combined model'),
+                    cost.benefit.axis=FALSE,col=c('#E56B81','#FED739','#51C0C9'))  
+dev.off()
+
+
+
+ROC_DATA  = c( 'ROC_train.csv', 'ROC_test.csv', 'ROC_val1.csv', 'ROC_val2.csv')
+Clin_DATA = c('Clin_train_results.csv', 'Clin_test_results.csv', 'Clin_val1_results.csv', 'Clin_val2_results.csv')
+Comd_DATA = c('Comd_train_results.csv', 'Comd_test_results.csv', 'Comd_val1_results.csv', 'Comd_val2_results.csv')
+for (co in c(1:Num)){LASSO_data = read.csv(Cohort[co]); Clin_data = read.csv(Clin_DATA[co]); Comd_data = read.csv(Comd_DATA[co]); ROC_data = data.frame(label=LASSO_data$label, Clinic.model = Clin_data[,2], Radiomics.model = LASSO_data[, Rads_var], Combined.model = Comd_data[,2]); write.csv(ROC_data, ROC_DATA[co], row.names = F)}
+
+Clin_formula
+Rads_formula
+Comd_formula
+print(' finish')

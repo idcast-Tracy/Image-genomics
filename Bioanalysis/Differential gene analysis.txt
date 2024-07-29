@@ -1,0 +1,85 @@
+# dev.off()
+cat("\014");rm(list = ls());options(warn = -1);library(edgeR);library(limma);library(DESeq2);library(dplyr); library(ggplot2); library(tinyarray); library(pheatmap);library(statmod)
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+method = 1 # 1 is edgeR, 2 is limma, and 3 is DEGs
+fdr=0.01 # Specifies the adjusted threshold for p
+logFC = 2 # # Specify a difference multiple threshold
+
+mydata <- read.csv('TCGA-count113.csv',row.names = 1);head(mydata)
+#            TCGA.AO.A03M TCGA.AO.A03V TCGA.AO.A0J8 
+# MT-CO1       351173       361051       568158      
+data <- read.csv('TCGA_group.csv')
+
+Countdata <- mydata[rowMeans(mydata)>0,]
+if(method==2){Countdata[,(1:ncol(Countdata))] <- log2(Countdata[,(1:ncol(Countdata))] + 0.01)}
+group <- factor(data[,"label"]) 
+# group <- as.data.frame(t(as.data.frame(group)));colnames(group) <- c(1:ncol(group))
+# group <- factor(group)
+
+
+if(method==1){
+dgelist <- DGEList(counts = Countdata, genes = rownames(Countdata), group = group)
+keep <- rowSums(cpm(dgelist) > 1 ) >= 1; dgelist <- dgelist[keep, , keep.lib.sizes = FALSE]
+dgelist_norm <- calcNormFactors(dgelist, method = 'TMM')
+design <- model.matrix(~group)
+dge <- estimateDisp(dgelist_norm, design, robust = TRUE)
+# fit <- glmFit(dge, design, robust = TRUE);lrt <- topTags(glmLRT(fit), n = nrow(dgelist$counts))
+mode='glmQLFTest'
+fit <- glmQLFit(dge, design, robust = TRUE);lrt <- topTags(glmQLFTest(fit), n = nrow(dgelist$counts))
+}else if(method==2){
+  design <- model.matrix(~0+group)
+  fit=lmFit(Countdata, design)
+  fit=eBayes(fit)
+  topTable(fit,coef=2,adjust='BH')
+  deg=topTable(fit,coef=2,adjust='BH',number = Inf)
+  colnames(deg)[5] <- "FDR"; head(deg)
+  lrt = deg
+}else{
+  colData <- data.frame(row.names = colnames(Countdata), condition = group)
+  dds <- DESeqDataSetFromMatrix(countData = round(Countdata, 0), colData = colData, design = ~ condition) %>% DESeq()  
+  res <- results(dds, contrast = c("condition",rev(levels(group))))
+  DEG <- res[order(res$pvalue),] %>% as.data.frame()
+  colnames(DEG)[2] <- "logFC";colnames(DEG)[6] <- "FDR"; head(DEG)
+  lrt = DEG
+}
+
+  
+if(method==1){lrt<-lrt$table}
+gene_diff <- lrt[order(lrt$FDR, lrt$logFC, decreasing = c(FALSE, TRUE)), ]
+gene_diff[which(gene_diff$logFC >= logFC & gene_diff$FDR < fdr),'sig'] <- 'up'
+gene_diff[which(gene_diff$logFC <= -logFC & gene_diff$FDR < fdr),'sig'] <- 'down'
+gene_diff[which(abs(gene_diff$logFC) <= logFC | gene_diff$FDR >= fdr),'sig'] <- 'non-significant'
+
+
+if(method==1){
+write.csv(gene_diff, 'edgeRdiff.csv',row.names = FALSE)
+gene_diff_select <- subset(gene_diff, sig %in% c('up', 'down'))
+write.csv(gene_diff_select, file = 'edgeRdiff.select.csv',row.names = FALSE )
+Differ_gene <- gene_diff_select[,"genes"]; select_feature = mydata[Differ_gene,]
+Final_data = select_feature
+write.csv(Final_data,'Diffgene_count.csv',row.names = FALSE)
+differ_geneID <- rownames(gene_diff_select)
+write.csv(differ_geneID,'Diffgene_ID.csv',row.names = FALSE)
+}else if(method==2){
+  write.csv(gene_diff, 'edgeRdiff.csv',row.names = FALSE)
+  gene_diff_select <- subset(gene_diff, sig %in% c('up', 'down'))
+  write.csv(gene_diff_select, file = 'edgeRdiff.select.csv',row.names = FALSE )
+  Differ_gene <- rownames(gene_diff_select); select_feature = mydata[Differ_gene,]
+  Final_data = select_feature
+  write.csv(Final_data,'Diffgene_count.csv',row.names = FALSE)
+  differ_geneID <- rownames(gene_diff_select)
+  write.csv(differ_geneID,'Diffgene_ID.csv',row.names = FALSE)
+}else{
+  write.csv(gene_diff, 'edgeRdiff.csv',row.names = FALSE)
+  gene_diff_select <- subset(gene_diff, sig %in% c('up', 'down'))
+  write.csv(gene_diff_select, file = 'edgeRdiff.select.csv',row.names = FALSE )
+  Differ_gene <- rownames(gene_diff_select); select_feature = mydata[Differ_gene,]
+  Final_data = select_feature
+  write.csv(Final_data,'Diffgene_count.csv',row.names = FALSE)
+  differ_geneID <- rownames(gene_diff_select)
+  write.csv(differ_geneID,'Diffgene_ID.csv',row.names = FALSE)
+}
+
+
+
